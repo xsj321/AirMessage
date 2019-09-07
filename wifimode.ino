@@ -12,10 +12,9 @@
 
 const char *ssid = APSSID;
 const char *password = APPSK;
-
+bool first = true;
 ESP8266WebServer server(80);
 SoftwareSerial espSerial(4, 5); //RX,TX
-String LastMSG = "";
 HtmlTool htool;
 
 String getContentType(String filename)
@@ -51,12 +50,11 @@ String getContentType(String filename)
 
 bool handleFileRead(String path)
 {
-  if (server.hasArg("MESSAGE"))
+  if (server.hasArg("message"))
   {
-    String recv = server.arg("MESSAGE");
+    String recv = server.arg("message");
     Serial.println(recv);
-    espSerial.print(server.arg(recv));
-    LastMSG = recv;
+    espSerial.print(recv);
     server.sendHeader("Location", "/");
     server.send(301);
     return true;
@@ -84,27 +82,7 @@ bool handleFileRead(String path)
   return false;
 }
 
-//根目录显示文件
-void handleRoot()
-{
-  Serial.println("Enter handleRoot");
-  String header;
 
-  if (server.hasArg("MESSAGE"))
-  {
-    Serial.println(server.arg("MESSAGE"));
-    espSerial.print(server.arg("MESSAGE"));
-    server.sendHeader("Location", "/");
-    server.sendHeader("Cache-Control", "no-cache");
-    server.send(301);
-    return;
-  }
-  File homepage = SPIFFS.open("index.html", "r");
-  size_t sent = server.streamFile(homepage, "text/html");
-  Serial.println(homepage);
-  homepage.close();
-  Serial.println("send ok");
-}
 
 void getMessage()
 {
@@ -113,6 +91,13 @@ void getMessage()
 //no need authentication
 void handleNotFound()
 {
+  if(first == true)
+  {
+    File file = SPIFFS.open("/init.html", "r");
+    server.streamFile(file, "text/html");
+    file.close();
+    first = false;
+  }
   if (!handleFileRead(server.uri()))
   {
     server.send(404, "text/plain", "FileNotFound");
@@ -121,12 +106,24 @@ void handleNotFound()
 
 void handleGetData()
 {
-    server.send(200,"text/plain",LastMSG);
+    String LastMSG;
+    while(espSerial.available()>0)
+    {
+       LastMSG += char(espSerial.read());
+    }
+    while(espSerial.read()>0);
+    Serial.print("收到消息：");
+    String JSONmsg = "{\"firstName\":\""+LastMSG+"\"}";
+    Serial.println(JSONmsg);
+    server.send(200,"text/plain",JSONmsg);
+    server.sendHeader("Location", "/");
+    server.send(301);
 }
 void setup(void)
 {
   Serial.begin(115200);
   espSerial.begin(115200);
+  espSerial.println("device start!!");
   SPIFFS.begin();
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, password);
@@ -143,7 +140,7 @@ void setup(void)
   Serial.println(ssid);
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-  server.on("/get",handleGetData);
+  server.on("/get/",handleGetData);
   server.onNotFound(handleNotFound);
   const char *headerkeys[] = {"User-Agent", "Cookie"};
   size_t headerkeyssize = sizeof(headerkeys) / sizeof(char *);
